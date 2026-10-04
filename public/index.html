@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blog</title>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f8fa;--card:#fff;--ink:#14213d;--mute:#5c6b80;--line:#dde3ea;--accent:#1f6f8b;--danger:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#10151c;--card:#171e28;--ink:#e8edf3;--mute:#93a1b3;--line:#273140;--accent:#5bb5d3;--danger:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 Inter,system-ui,sans-serif}
+header{border-bottom:1px solid var(--line);background:var(--card)}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px}
+nav{display:flex;align-items:center;gap:12px;padding:14px 0}
+nav .logo{font:600 22px Newsreader,serif;cursor:pointer;margin-right:auto}
+h1,h2{font-family:Newsreader,serif;line-height:1.2}
+main{padding:28px 0 60px}
+button,.btn{font:500 14px Inter,sans-serif;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:6px;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--danger)}
+button.link{border:0;background:none;padding:0;color:var(--accent)}
+input,textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);margin-bottom:12px}
+textarea{min-height:200px;resize:vertical}
+.post{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px;margin-bottom:16px;cursor:pointer}
+.post h2{margin:0 0 6px;font-size:24px}
+.meta{color:var(--mute);font-size:14px}
+.body{white-space:pre-wrap;font:18px/1.75 Newsreader,serif;margin:20px 0}
+.comment{border-top:1px solid var(--line);padding:12px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.err{color:var(--danger);margin:0 0 12px;min-height:1.2em}
+.empty{color:var(--mute);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+<header><div class="wrap"><nav id="nav"></nav></div></header>
+<main><div class="wrap" id="app"></div></main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = d => new Date(d).toLocaleDateString('hi-IN', {day:'numeric', month:'short', year:'numeric'});
+let token = localStorage.getItem('token');
+let me = JSON.parse(localStorage.getItem('user') || 'null');
+
+async function api(path, method = 'GET', body) {
+  const res = await fetch('/api' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Kuch galat ho gaya');
+  return data;
+}
+function setAuth(t, u) {
+  token = t; me = u;
+  if (t) { localStorage.setItem('token', t); localStorage.setItem('user', JSON.stringify(u)); }
+  else { localStorage.removeItem('token'); localStorage.removeItem('user'); }
+}
+function renderNav() {
+  $('#nav').innerHTML = `<span class="logo" onclick="go('')">Blog</span>` + (me
+    ? `<span class="meta">${esc(me.username)}</span><button class="primary" onclick="go('new')">Naya post</button><button onclick="logout()">Logout</button>`
+    : `<button onclick="go('login')">Login</button><button class="primary" onclick="go('register')">Register</button>`);
+}
+const go = h => { location.hash = h; };
+function logout() { setAuth(null); renderNav(); go(''); }
+
+async function home() {
+  $('#app').innerHTML = '<p class="empty">Load ho raha hai…</p>';
+  const posts = await api('/posts');
+  $('#app').innerHTML = posts.length ? posts.map(p => `
+    <article class="post" onclick="go('post/${p._id}')">
+      <h2>${esc(p.title)}</h2>
+      <div class="meta">${esc(p.author?.username || 'Unknown')} • ${fmt(p.createdAt)}</div>
+      <p>${esc(p.content.slice(0, 160))}${p.content.length > 160 ? '…' : ''}</p>
+    </article>`).join('') : '<p class="empty">Abhi koi post nahi hai. Login karke pehla post likho.</p>';
+}
+
+async function post(id) {
+  const p = await api('/posts/' + id);
+  const mine = me && p.author && p.author._id === me.id;
+  $('#app').innerHTML = `
+    <button class="link" onclick="go('')">← Saare posts</button>
+    <h1>${esc(p.title)}</h1>
+    <div class="meta">${esc(p.author?.username)} • ${fmt(p.createdAt)}</div>
+    ${mine ? `<div class="row" style="margin-top:12px"><button onclick="go('edit/${p._id}')">Edit</button><button class="danger" onclick="delPost('${p._id}')">Delete</button></div>` : ''}
+    <div class="body">${esc(p.content)}</div>
+    <h2>Comments (${p.comments.length})</h2>
+    <div id="comments">${p.comments.map(c => `
+      <div class="comment">
+        <div class="meta">${esc(c.author?.username)} • ${fmt(c.createdAt)}
+          ${me && (c.author?._id === me.id || mine) ? `<button class="link danger" onclick="delComment('${c._id}','${p._id}')">Delete</button>` : ''}</div>
+        <div>${esc(c.text)}</div>
+      </div>`).join('') || '<p class="meta">Abhi koi comment nahi.</p>'}</div>
+    ${me ? `<div style="margin-top:16px"><textarea id="ctext" style="min-height:80px" placeholder="Comment likho"></textarea>
+      <p class="err" id="err"></p><button class="primary" onclick="addComment('${p._id}')">Comment karo</button></div>`
+      : `<p class="meta" style="margin-top:16px">Comment karne ke liye <a href="#login">login</a> karo.</p>`}`;
+}
+async function addComment(id) {
+  try { await api(`/posts/${id}/comments`, 'POST', { text: $('#ctext').value }); await post(id); }
+  catch (e) { $('#err').textContent = e.message; }
+}
+async function delComment(cid, pid) {
+  if (!confirm('Comment delete karna hai?')) return;
+  try { await api('/comments/' + cid, 'DELETE'); await post(pid); } catch (e) { alert(e.message); }
+}
+async function delPost(id) {
+  if (!confirm('Post delete karna hai?')) return;
+  try { await api('/posts/' + id, 'DELETE'); go(''); } catch (e) { alert(e.message); }
+}
+
+async function editor(id) {
+  if (!me) return go('login');
+  const p = id ? await api('/posts/' + id) : { title: '', content: '' };
+  $('#app').innerHTML = `<h1>${id ? 'Post edit karo' : 'Naya post'}</h1>
+    <input id="t" placeholder="Title" value="${esc(p.title)}">
+    <textarea id="c" placeholder="Likho…">${esc(p.content)}</textarea>
+    <p class="err" id="err"></p>
+    <button class="primary" id="save">${id ? 'Save changes' : 'Publish'}</button>`;
+  $('#save').onclick = async () => {
+    try {
+      const body = { title: $('#t').value, content: $('#c').value };
+      const r = id ? await api('/posts/' + id, 'PUT', body) : await api('/posts', 'POST', body);
+      go('post/' + r._id);
+    } catch (e) { $('#err').textContent = e.message; }
+  };
+}
+
+function authForm(mode) {
+  const reg = mode === 'register';
+  $('#app').innerHTML = `<h1>${reg ? 'Register' : 'Login'}</h1><div style="max-width:380px">
+    ${reg ? '<input id="u" placeholder="Username">' : ''}
+    <input id="e" type="email" placeholder="Email">
+    <input id="p" type="password" placeholder="Password (min 6)">
+    <p class="err" id="err"></p>
+    <button class="primary" id="go">${reg ? 'Account banao' : 'Login karo'}</button></div>`;
+  $('#go').onclick = async () => {
+    try {
+      const body = { email: $('#e').value, password: $('#p').value };
+      if (reg) body.username = $('#u').value;
+      const r = await api('/auth/' + mode, 'POST', body);
+      setAuth(r.token, r.user); renderNav(); go('');
+    } catch (e) { $('#err').textContent = e.message; }
+  };
+}
+
+async function route() {
+  renderNav();
+  const [page, id] = location.hash.slice(1).split('/');
+  try {
+    if (page === 'post' && id) await post(id);
+    else if (page === 'new') await editor();
+    else if (page === 'edit' && id) await editor(id);
+    else if (page === 'login' || page === 'register') authForm(page);
+    else await home();
+  } catch (e) { $('#app').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
